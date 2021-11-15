@@ -1,26 +1,12 @@
 # This script is meant to be run on R2 using the YYYY.nc files located in
-# scratch/LEAF/Padian to calculate the custom GDD at each location for each
-# year. The resulting file should be a [348,327,366] where 348 is the x or 
-# longitude direction, 327 is the y or latitude direction, and 366 is one
-# one column with daily GDD values at each location for that year. The output
-# file should be located on R2 in scratch/LEAF/Padian/DD. A cumulative
-# summation script will follow. 
+# scratch/LEAF/Padian to calculate the custom GDD, and cumulative GDD at each 
+# location for each year. Both will be saved as their own netcdf files. 
 
 ###############################################################################
 # Libraries to Open
 ###############################################################################
 
 library(ncdf4)
-library(readr)
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(RNetCDF)
-library(weathermetrics)
-library(viridis)
-library(DescTools)
-library(abind)
-library(date)
 
 ###############################################################################
 # Custom Functions
@@ -119,11 +105,14 @@ leap <- function(y) {
 }
 
 
+# Testing Path:
+#DD_path <- "/scratch/leaf/Padian"
 
-DD_path <- "/scratch/leaf/Padian"
-#DD_path <- "~/Desktop/ISDA_Code_2021/DD_SWD"
-# set to one, two or all years
-years <- c(2012,2013,2014)
+# R2 Path
+DD_path <- "~/Desktop/ISDA_Code_2021/DD_SWD"
+
+# Set the years to calculate:
+years <- c(2014)
 
 
 for(year in years) {
@@ -143,12 +132,12 @@ for(year in years) {
     t <- 366
   }
   
-  tdim <- ncdim_def("Calendar Day", sprintf("days since %d-01-01 00:00:00", year), 1:t)
+  tdim <- ncdim_def("t", sprintf("days since %d-01-01 00:00:00", year), 1:t)
   xdim <- ncdim_def("x", "kilometers-ish", 1:348)
   ydim <- ncdim_def("y", "kilometers-ish", 1:327)
   dims = list(xdim, ydim, tdim)
+  
   DD_var <- ncvar_def("DD", "GDD (unitless)", dims)
- 
   GDD <- nc_create(sprintf("%dGDD.nc", year), list(DD_var))
   ncvar_put(GDD, DD_var, DD_temp2)
   nc_close(GDD)
@@ -160,29 +149,39 @@ for(year in years) {
 
 for(year in years) {
   print(year)
-  file_path <- sprintf("%s/%dGDD.nc",DD_path, year)
-  GDD_nc_temp <- nc_open(file_path)
-  
-  GDD_temp <- ncvar_get(GDD_nc_temp, "DD")
-  
-  CS_GDD_temp <- apply(GDD_temp, c(1,2), cumsum)
-    # ^^ This produces [365 348 327]
-  #CS_GDD_temp <- mapply(cumsum, GDD_temp) # I TRIED
-  #CS_GDD_temp2 <- array(CS_GDD_temp, dim=dim(GDD_temp)) # YOU WIN
-  #dim(CS_GDD_temp2)
   
   t <- 365
   if(leap(year)) {
     t <- 366
   }
   
-  tdim <- ncdim_def("Calendar Day", sprintf("days since %d-01-01 00:00:00", year), 1:t)
+  file_path <- sprintf("%s/%dGDD.nc",DD_path, year)
+  GDD_nc_temp <- nc_open(file_path)
+  GDD_temp <- ncvar_get(GDD_nc_temp, "DD")
+  
+  #Blank array for cumulative GDD 
+  CGDD <- array(data=NA, dim=c(348, 327, t))
+  
+  # It may be slow and clunky but it works!
+  loc_1 <- 1
+  loc_2 <- 1
+  
+  for(loc_1 in seq(from=1, to=348, by=1)) {
+    for(loc_2 in seq(from=1, to=327, by=1)) {
+      cumsum_temp <- cumsum(GDD_temp[loc_1, loc_2, 1:t])
+      CGDD[loc_1,loc_2,1:t] <- cumsum_temp
+    }
+  }
+  
+  # CGDD to saved netcdf:
+  
+  tdim <- ncdim_def("t", sprintf("days since %d-01-01 00:00:00", year), 1:t)
   xdim <- ncdim_def("x", "kilometers-ish - xlat", 1:348)
   ydim <- ncdim_def("y", "kilometers-ish- ylat", 1:327)
-  dims = list(tdim, xdim, ydim)
-  CDD_var <- ncvar_def("Cumulative Summation GDD", "Cumulative GDD (unitless)", dims)
+  dims = list(xdim, ydim, tdim)
   
-  CS_GDD <- nc_create(sprintf("%dCGDD.nc", year), list(CDD_var))
-  ncvar_put(CS_GDD, CDD_var, CS_GDD_temp)
+  CSGDD_var <- ncvar_def("Cumulative Summation GDD", "Cumulative GDD (unitless)", dims)
+  CS_GDD <- nc_create(sprintf("%dCGDD_test.nc", year), list(CSGDD_var))
+  ncvar_put(CS_GDD, CSGDD_var, CGDD)
   nc_close(CS_GDD)
 }
